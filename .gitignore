@@ -1,5 +1,4 @@
 booked.csv
-state.json
 *.log
 
 *.py[cod]

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Daily availability check.
+
+  Symlink into ~/Library/LaunchAgents/ and load:
+
+    ln -s "$PWD/com.eklavya.peoriacharter-availability.plist" ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.eklavya.peoriacharter-availability.plist
+
+  Force a run:   launchctl kickstart -k gui/$(id -u)/com.eklavya.peoriacharter-availability
+  Check status:  launchctl print gui/$(id -u)/com.eklavya.peoriacharter-availability
+  Unload:        launchctl bootout gui/$(id -u)/com.eklavya.peoriacharter-availability
+
+  A LaunchAgent, not a LaunchDaemon: it must run inside the GUI session for notifications to appear.
+  If the machine is asleep at the scheduled time the run happens on wake;
+  missed days are coalesced into a single catch-up run.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.eklavya.peoriacharter-availability</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/eklavya/code/repos/web/peoriacharter-availability/check.py</string>
+    <!-- Require a notifier: fail loudly rather than run and announce nothing. -->
+    <string>--notify</string>
+    <string>on</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/eklavya/code/repos/web/peoriacharter-availability</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>18</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- launchd appends, so this is the run log. Nothing rotates it. -->
+  <key>StandardOutPath</key>
+  <string>/Users/eklavya/code/repos/web/peoriacharter-availability/check.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/eklavya/code/repos/web/peoriacharter-availability/check.log</string>
+
+  <!-- osascript lives in /usr/bin; shutil.which needs a PATH to find it. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Deliberately absent: RunAtLoad. Loading the agent, or logging back in, would otherwise fire an extra run. -->
+</dict>
+</plist>
