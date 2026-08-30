@@ -1,7 +1,8 @@
-secret
-.env
+booked.csv
+state.json
+*.log
 
-*.pyc
+*.py[cod]
 __pycache__
 .mypy_cache
 *~

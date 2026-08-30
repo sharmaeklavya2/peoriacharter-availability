@@ -12,17 +12,29 @@ from __future__ import annotations
 import sys
 import time
 from datetime import date as Date
-from typing import Final, Iterable, Sequence
+from typing import Collection, Final, Iterable, Sequence
 
 from availability import AvailabilityError, Bus, fetch_buses
-from plans import PLANS, Leg, Plan, collect_legs
+from plans import (
+    BOOKED_PATH,
+    PLANS,
+    BookedEntry,
+    Leg,
+    Plan,
+    collect_legs,
+    load_booked,
+)
 
 REQUEST_SPACING: Final[float] = 1.0
 
 
-def check_plans(plans: Iterable[Plan], today: Date) -> int:
+def check_plans(
+    plans: Iterable[Plan],
+    today: Date,
+    booked: Collection[BookedEntry] = (),
+) -> int:
     """Print results for every leg of every enabled plan; return a failure count."""
-    wanted: dict[Leg, set[str]] = collect_legs(plans, today)
+    wanted: dict[Leg, set[str]] = collect_legs(plans, today, booked)
     if not wanted:
         print("No legs to check today.")
         return 0
@@ -57,7 +69,10 @@ def check_plans(plans: Iterable[Plan], today: Date) -> int:
 
 
 def main() -> int:
-    failures: int = check_plans(PLANS, Date.today())
+    # The file read happens here, at the entry point, so check_plans and
+    # collect_legs stay pure functions of their arguments.
+    booked: set[BookedEntry] = load_booked(BOOKED_PATH, PLANS)
+    failures: int = check_plans(PLANS, Date.today(), booked)
     if failures:
         print(f"{failures} leg(s) could not be checked.", file=sys.stderr)
         return 1

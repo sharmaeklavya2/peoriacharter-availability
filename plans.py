@@ -12,12 +12,18 @@ so a one-off trip stops generating work once the date has passed and needs no ma
 from __future__ import annotations
 
 import calendar
+import csv
 from dataclasses import dataclass
 from datetime import date as Date
 from datetime import timedelta
-from typing import Callable, Final, Iterable, Iterator
+from pathlib import Path
+from typing import Callable, Collection, Final, Iterable, Iterator
 
 from availability import resolve_dropoff, resolve_pickup
+
+# Bookings are personal state that changes weekly, so they live in a gitignored
+# data file rather than in this module.
+BOOKED_PATH: Final[Path] = Path(__file__).parent / "booked.csv"
 
 
 @dataclass(frozen=True)
@@ -45,6 +51,65 @@ class Plan:
     name: str
     legs: Callable[[Date], Iterable[Leg]]
     enabled: bool = True
+
+
+@dataclass(frozen=True)
+class BookedEntry:
+    """A trip already ticketed: stop checking this plan on this date."""
+
+    travel_date: Date
+    plan: str
+
+
+class BookedFileError(Exception):
+    """The booked file could not be parsed.
+
+    Raised rather than skipping bad lines: a typo that silently stops
+    suppressing -- or silently suppresses the wrong thing -- is a failure you
+    would never notice.
+    """
+
+
+def load_booked(path: Path, plans: Iterable[Plan]) -> set[BookedEntry]:
+    """Read booked trips from a CSV of `date,plan` rows.
+
+    Blank lines, `#` comments and an optional `date,plan` header are ignored. A
+    missing file means nothing is booked, so a fresh clone just works.
+
+    Plan names are validated against `plans`, which catches both typos and
+    entries orphaned by renaming a plan.
+    """
+    try:
+        text: str = path.read_text()
+    except FileNotFoundError:
+        return set()
+
+    known: set[str] = {plan.name for plan in plans}
+    booked: set[BookedEntry] = set()
+    for number, line in enumerate(text.splitlines(), start=1):
+        stripped: str = line.split("#", 1)[0].strip()
+        if not stripped:
+            continue
+        row: list[str] = next(csv.reader([stripped]))
+        if [field.strip().lower() for field in row] == ["date", "plan"]:
+            continue
+        if len(row) != 2:
+            raise BookedFileError(
+                f"{path}:{number}: expected 'date,plan', got {stripped!r}"
+            )
+        raw_date, raw_plan = (field.strip() for field in row)
+        try:
+            travel_date: Date = Date.fromisoformat(raw_date)
+        except ValueError:
+            raise BookedFileError(
+                f"{path}:{number}: {raw_date!r} is not an ISO date (YYYY-MM-DD)"
+            ) from None
+        if raw_plan not in known:
+            raise BookedFileError(
+                f"{path}:{number}: unknown plan {raw_plan!r}; known: {sorted(known)}"
+            )
+        booked.add(BookedEntry(travel_date, raw_plan))
+    return booked
 
 
 def weekend_trips(
@@ -101,12 +166,23 @@ def _next_weekday(start: Date, weekday: int) -> Date:
     return start + timedelta(days=(weekday - start.weekday()) % 7)
 
 
-def collect_legs(plans: Iterable[Plan], today: Date) -> dict[Leg, set[str]]:
+def collect_legs(
+    plans: Iterable[Plan],
+    today: Date,
+    booked: Collection[BookedEntry] = (),
+) -> dict[Leg, set[str]]:
     """Expand every enabled plan into a deduplicated leg -> plan-names map.
 
     Two plans asking for the same leg should cost one request and produce one
     notification, while still reporting which plans wanted it.
+
+    Booked trips are dropped per plan, not per leg: if two plans want the same
+    leg and only one has it booked, the leg is still checked for the other and
+    the attribution stays honest.
+
+    Pure -- callers pass `booked` in rather than this reading the file.
     """
+    already: set[BookedEntry] = set(booked)
     wanted: dict[Leg, set[str]] = {}
     for plan in plans:
         if not plan.enabled:
@@ -114,6 +190,8 @@ def collect_legs(plans: Iterable[Plan], today: Date) -> dict[Leg, set[str]]:
         for leg in plan.legs(today):
             if leg.travel_date < today:
                 continue  # defensive: never look up a date in the past
+            if BookedEntry(leg.travel_date, plan.name) in already:
+                continue
             wanted.setdefault(leg, set()).add(plan.name)
     return wanted
 
@@ -139,9 +217,11 @@ PLANS: Final[list[Plan]] = [
 
 if __name__ == "__main__":
     today: Date = Date.today()
-    print(f"Plans for {today:%a %Y-%m-%d}:\n")
+    booked: set[BookedEntry] = load_booked(BOOKED_PATH, PLANS)
+    print(f"Plans for {today:%a %Y-%m-%d} ({len(booked)} booked):\n")
     for leg, names in sorted(
-        collect_legs(PLANS, today).items(), key=lambda item: item[0].travel_date
+        collect_legs(PLANS, today, booked).items(),
+        key=lambda item: item[0].travel_date,
     ):
         # Fail loudly here rather than at request time on a typo'd stop name.
         resolve_pickup(leg.source)
