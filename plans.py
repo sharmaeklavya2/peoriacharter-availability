@@ -90,14 +90,14 @@ def load_booked(path: Path, plans: Iterable[Plan]) -> set[BookedEntry]:
         stripped: str = line.split("#", 1)[0].strip()
         if not stripped:
             continue
-        row: list[str] = next(csv.reader([stripped]))
-        if [field.strip().lower() for field in row] == ["date", "plan"]:
-            continue
-        if len(row) != 2:
+        row: list[str] = [x.strip() for x in next(csv.reader([stripped]))]
+        if len(row) not in (2, 3):
             raise BookedFileError(
-                f"{path}:{number}: expected 'date,plan', got {stripped!r}"
+                f"{path}:{number}: expected 'date,plan[,status]', got {stripped!r}"
             )
-        raw_date, raw_plan = (field.strip() for field in row)
+        if row[0].lower() == 'date' and row[1].lower() == 'plan':
+            continue
+        raw_date, raw_plan = row[0], row[1]
         try:
             travel_date: Date = Date.fromisoformat(raw_date)
         except ValueError:
